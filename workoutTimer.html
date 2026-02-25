@@ -481,6 +481,7 @@
                     clearInterval(this.interval);
                     this.isPaused = true;
                     this.startBtn.textContent = 'Resume';
+                    this.startBtn.disabled = false;
                     this.pauseBtn.disabled = true;
                 }
             }

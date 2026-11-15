@@ -4,10 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#17202b">
-<link rel="manifest" href="manifest.webmanifest">
 <title>Tilt Runner</title>
 <style>
-html,body{margin:0;padding:0;height:100%;background:#0d1218;overscroll-behavior:none}
+html,body{margin:0;padding:0;height:100%;background:#0d1218;overscroll-behavior:none;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
 #game-root{position:fixed;inset:0}
 </style>
 </head>
@@ -34,6 +33,8 @@ function startTiltRunner(container) {
 .tr-start{background:#73a89a;color:#fff;border:0;border-radius:10px;padding:14px 34px;font-size:18px;font-weight:700}
 .tr-note{color:rgba(255,255,255,.55);font-size:12px;margin-top:14px}
 .tr-score{color:#ffd166;font-size:26px;font-weight:700;margin-bottom:4px}
+.tr-tilt{color:#9fe0c9;font-size:12px;margin-top:12px;font-weight:700;letter-spacing:.03em;line-height:1.4}
+.tr-tilt.tr-warn{color:#f4a261}
 `;
     const styleEl = document.createElement('style');
     styleEl.textContent = css;
@@ -50,6 +51,7 @@ function startTiltRunner(container) {
             '<div class="tr-sub">Tilt your phone left and right to steer.<br>Bottom-left button jumps. Bottom-right button boosts.</div>' +
             '<button class="tr-start" type="button">Start</button>' +
             '<div class="tr-note">No tilt sensor? Drag on the track to steer, or use the arrow keys.</div>' +
+            '<div class="tr-tilt">Tilt: checking sensor\u2026</div>' +
             '</div>' +
             '</div>';
     container.appendChild(stage);
@@ -132,7 +134,9 @@ function startTiltRunner(container) {
                 '<div class="tr-score">' + m + ' m</div>' +
                 '<div class="tr-sub">Best: ' + best + ' m</div>' +
                 '<button class="tr-start" type="button">Run again</button>' +
+                '<div class="tr-tilt"></div>' +
                 '</div>';
+        updateTiltStatus();
         overlay.classList.remove('tr-hidden');
         overlay.querySelector('.tr-start').addEventListener('click', startRun);
     }
@@ -163,9 +167,29 @@ function startTiltRunner(container) {
     }
     overlay.querySelector('.tr-start').addEventListener('click', onStart);
     function onOrientation(e) {
-        if (typeof e.gamma === 'number') {
+        if (typeof e.gamma === 'number' && e.gamma !== null && !isNaN(e.gamma)) {
             gamma = e.gamma;
-            gotTilt = true;
+            if (!gotTilt) {
+                gotTilt = true;
+                updateTiltStatus();
+            }
+        }
+    }
+    function onOrientationAbsolute(e) {
+        if (!gotTilt)
+            onOrientation(e);
+    }
+    function updateTiltStatus() {
+        const el = stage.querySelector('.tr-tilt');
+        if (!el)
+            return;
+        if (gotTilt) {
+            el.classList.remove('tr-warn');
+            el.textContent = 'Tilt: sensor active';
+        }
+        else {
+            el.classList.add('tr-warn');
+            el.textContent = 'Tilt: no sensor data. On Brave (Android): Settings > Site settings > Motion sensors > Allowed, then reload. Drag to steer meanwhile.';
         }
     }
     function steer(dt) {
@@ -354,6 +378,8 @@ function startTiltRunner(container) {
     }
     const onWinResize = () => resize();
     window.addEventListener('deviceorientation', onOrientation);
+    window.addEventListener('deviceorientationabsolute', onOrientationAbsolute);
+    setTimeout(updateTiltStatus, 2000);
     window.addEventListener('resize', onWinResize);
     window.addEventListener('keydown', keyDown);
     window.addEventListener('keyup', keyUp);
@@ -365,6 +391,7 @@ function startTiltRunner(container) {
     return function destroy() {
         cancelAnimationFrame(raf);
         window.removeEventListener('deviceorientation', onOrientation);
+        window.removeEventListener('deviceorientationabsolute', onOrientationAbsolute);
         window.removeEventListener('resize', onWinResize);
         window.removeEventListener('keydown', keyDown);
         window.removeEventListener('keyup', keyUp);
@@ -373,7 +400,6 @@ function startTiltRunner(container) {
     };
 }
 startTiltRunner(document.getElementById('game-root'));
-if ('serviceWorker' in navigator) { window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); }); }
 </script>
 </body>
 </html>

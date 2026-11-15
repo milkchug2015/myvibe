@@ -1,0 +1,14 @@
+{
+  "name": "Tilt Runner",
+  "short_name": "Tilt Runner",
+  "description": "Tilt your phone to steer the ball. Jump the hurdles, dodge the blocks, boost for distance.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1218",
+  "theme_color": "#17202b",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

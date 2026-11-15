@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#17202b">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Tilt Runner</title>
 <style>
 html,body{margin:0;padding:0;height:100%;background:#0d1218;overscroll-behavior:none}
@@ -372,6 +373,7 @@ function startTiltRunner(container) {
     };
 }
 startTiltRunner(document.getElementById('game-root'));
+if ('serviceWorker' in navigator) { window.addEventListener('load', function() { navigator.serviceWorker.register('sw.js').catch(function() {}); }); }
 </script>
 </body>
 </html>

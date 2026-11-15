@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#17202b">
+<title>Tilt Runner</title>
+<style>
+html,body{margin:0;padding:0;height:100%;background:#0d1218;overscroll-behavior:none}
+#game-root{position:fixed;inset:0}
+</style>
+</head>
+<body>
+<div id="game-root"></div>
+<script>
+"use strict";
+// Tilt Runner game core. Plain DOM + canvas so the same code powers the
+// hosted page and the standalone index.html for the myvibe repo.
+// The generator script strips the type annotations from the signature below
+// to produce the browser-only version; keep the rest annotation-free.
+function startTiltRunner(container) {
+    const css = `
+.tr-stage{position:relative;width:100%;height:100%;overflow:hidden;border-radius:16px;background:#17202b;touch-action:none;user-select:none;-webkit-user-select:none;font-family:inherit}
+.tr-canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.tr-btn{position:absolute;bottom:18px;width:78px;height:78px;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(23,32,43,.55);color:#fff;font-size:14px;font-weight:700;letter-spacing:.04em;backdrop-filter:blur(2px);touch-action:none;z-index:3}
+.tr-btn.tr-on{background:rgba(115,168,154,.75)}
+.tr-jump{left:16px}
+.tr-boost{right:16px}
+.tr-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,14,19,.72);z-index:4;text-align:center;padding:20px}
+.tr-overlay.tr-hidden{display:none}
+.tr-title{color:#fff;font-size:30px;font-weight:700;margin-bottom:10px}
+.tr-sub{color:rgba(255,255,255,.85);font-size:15px;line-height:1.5;margin-bottom:18px}
+.tr-start{background:#73a89a;color:#fff;border:0;border-radius:10px;padding:14px 34px;font-size:18px;font-weight:700}
+.tr-note{color:rgba(255,255,255,.55);font-size:12px;margin-top:14px}
+.tr-score{color:#ffd166;font-size:26px;font-weight:700;margin-bottom:4px}
+`;
+    const styleEl = document.createElement('style');
+    styleEl.textContent = css;
+    container.appendChild(styleEl);
+    const stage = document.createElement('div');
+    stage.className = 'tr-stage';
+    stage.innerHTML =
+        '<canvas class="tr-canvas"></canvas>' +
+            '<button class="tr-btn tr-jump" type="button" aria-label="Jump">JUMP</button>' +
+            '<button class="tr-btn tr-boost" type="button" aria-label="Boost">BOOST</button>' +
+            '<div class="tr-overlay">' +
+            '<div class="tr-panel">' +
+            '<div class="tr-title">Tilt Runner</div>' +
+            '<div class="tr-sub">Tilt your phone left and right to steer.<br>Bottom-left button jumps. Bottom-right button boosts.</div>' +
+            '<button class="tr-start" type="button">Start</button>' +
+            '<div class="tr-note">No tilt sensor? Drag on the track to steer, or use the arrow keys.</div>' +
+            '</div>' +
+            '</div>';
+    container.appendChild(stage);
+    const canvas = stage.querySelector('.tr-canvas');
+    const ctx = canvas.getContext('2d');
+    const jumpBtn = stage.querySelector('.tr-jump');
+    const boostBtn = stage.querySelector('.tr-boost');
+    const overlay = stage.querySelector('.tr-overlay');
+    let W = 300, H = 500;
+    function resize() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        W = stage.clientWidth;
+        H = stage.clientHeight;
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    // --- game state ---
+    let phase = 'menu'; // menu | playing | over | paused
+    let raf = 0, last = 0;
+    let dist = 0, speed = 240, boostHeld = false, spawnTimer = 1;
+    let dashOffset = 0;
+    let best = 0;
+    try {
+        best = Number(localStorage.getItem('tiltRunnerBest') || 0) || 0;
+    }
+    catch (e) { /* private mode */ }
+    const ball = { x: W / 2, r: 16, airT: -1 };
+    const AIRTIME = 0.62;
+    let obstacles = [];
+    // steering inputs
+    let gamma0 = null, gamma = 0, gotTilt = false;
+    let keyLeft = false, keyRight = false;
+    let dragging = false, dragX = 0;
+    function ballY() { return H * 0.72; }
+    function jumpLift() {
+        if (ball.airT < 0)
+            return 0;
+        return Math.sin(Math.PI * Math.min(ball.airT / AIRTIME, 1)) * H * 0.16;
+    }
+    function airborne() { return ball.airT >= 0 && ball.airT < AIRTIME * 0.9; }
+    function doJump() {
+        if (phase !== 'playing' || ball.airT >= 0)
+            return;
+        ball.airT = 0;
+    }
+    function spawn() {
+        const roadL = 10, roadR = W - 10;
+        if (Math.random() < 0.55) {
+            const w = W * (0.45 + Math.random() * 0.35);
+            const x = roadL + Math.random() * Math.max(roadR - roadL - w, 1);
+            obstacles.push({ x, y: -30, w, h: 16, type: 'hurdle', scored: false });
+        }
+        else {
+            const s = 52 + Math.random() * 34;
+            const x = roadL + Math.random() * Math.max(roadR - roadL - s, 1);
+            obstacles.push({ x, y: -s - 10, w: s, h: s, type: 'block', scored: false });
+        }
+    }
+    function circleRect(cx, cy, r, rx, ry, rw, rh) {
+        const nx = Math.max(rx, Math.min(cx, rx + rw));
+        const ny = Math.max(ry, Math.min(cy, ry + rh));
+        const dx = cx - nx, dy = cy - ny;
+        return dx * dx + dy * dy < r * r;
+    }
+    function crash() {
+        phase = 'over';
+        const m = Math.floor(dist);
+        if (m > best) {
+            best = m;
+            try {
+                localStorage.setItem('tiltRunnerBest', String(best));
+            }
+            catch (e) { /* ignore */ }
+        }
+        overlay.innerHTML =
+            '<div class="tr-panel">' +
+                '<div class="tr-title">Crashed</div>' +
+                '<div class="tr-score">' + m + ' m</div>' +
+                '<div class="tr-sub">Best: ' + best + ' m</div>' +
+                '<button class="tr-start" type="button">Run again</button>' +
+                '</div>';
+        overlay.classList.remove('tr-hidden');
+        overlay.querySelector('.tr-start').addEventListener('click', startRun);
+    }
+    function startRun() {
+        dist = 0;
+        speed = 240;
+        obstacles = [];
+        spawnTimer = 0.9;
+        ball.x = W / 2;
+        ball.airT = -1;
+        gamma0 = gotTilt ? gamma : 0;
+        phase = 'playing';
+        overlay.classList.add('tr-hidden');
+        try {
+            stage.scrollIntoView({ block: 'start' });
+        }
+        catch (e) { /* older browsers */ }
+    }
+    async function onStart() {
+        const doe = window.DeviceOrientationEvent;
+        if (doe && typeof doe.requestPermission === 'function') {
+            try {
+                await doe.requestPermission();
+            }
+            catch (e) { /* user declined; fallbacks stay on */ }
+        }
+        startRun();
+    }
+    overlay.querySelector('.tr-start').addEventListener('click', onStart);
+    function onOrientation(e) {
+        if (typeof e.gamma === 'number') {
+            gamma = e.gamma;
+            gotTilt = true;
+        }
+    }
+    function steer(dt) {
+        let s = 0;
+        if (gotTilt && gamma0 !== null) {
+            const d = gamma - gamma0;
+            s = Math.abs(d) < 2 ? 0 : Math.max(-1, Math.min(1, d / 20));
+        }
+        if (keyLeft)
+            s = -1;
+        if (keyRight)
+            s = 1;
+        if (dragging) {
+            const diff = dragX - ball.x;
+            s = Math.max(-1, Math.min(1, diff / 60));
+        }
+        ball.x += s * (300 + speed * 0.25) * dt;
+        const m = ball.r + 12;
+        if (ball.x < m)
+            ball.x = m;
+        if (ball.x > W - m)
+            ball.x = W - m;
+    }
+    function step(dt) {
+        const mult = boostHeld ? 1.6 : 1;
+        speed = Math.min(240 + dist * 1.6, 520);
+        const v = speed * mult;
+        dist += v * dt / 50;
+        dashOffset = (dashOffset + v * dt) % 48;
+        steer(dt);
+        if (ball.airT >= 0) {
+            ball.airT += dt;
+            if (ball.airT >= AIRTIME)
+                ball.airT = -1;
+        }
+        spawnTimer -= dt;
+        if (spawnTimer <= 0) {
+            spawn();
+            spawnTimer = (0.75 + Math.random() * 0.5) * (300 / v);
+        }
+        const by = ballY(), lift = jumpLift();
+        for (const o of obstacles)
+            o.y += v * dt;
+        obstacles = obstacles.filter(o => o.y < H + 60);
+        for (const o of obstacles) {
+            if (o.y > by + ball.r + 20)
+                continue;
+            if (o.y + o.h < by - ball.r - lift)
+                continue;
+            if (o.type === 'hurdle' && airborne())
+                continue;
+            if (circleRect(ball.x, by - lift, ball.r * 0.9, o.x, o.y, o.w, o.h)) {
+                crash();
+                return;
+            }
+        }
+    }
+    function draw() {
+        // road
+        ctx.fillStyle = '#17202b';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#10161e';
+        ctx.fillRect(0, 0, 10, H);
+        ctx.fillRect(W - 10, 0, 10, H);
+        ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([22, 26]);
+        ctx.lineDashOffset = -dashOffset;
+        ctx.beginPath();
+        ctx.moveTo(W / 2, 0);
+        ctx.lineTo(W / 2, H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (const o of obstacles) {
+            if (o.type === 'hurdle') {
+                ctx.fillStyle = '#f4a261';
+                ctx.beginPath();
+                ctx.roundRect ? ctx.roundRect(o.x, o.y, o.w, o.h, 8) : ctx.rect(o.x, o.y, o.w, o.h);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                for (let sx = o.x + 10; sx < o.x + o.w - 8; sx += 26)
+                    ctx.fillRect(sx, o.y + 3, 10, o.h - 6);
+            }
+            else {
+                ctx.fillStyle = '#ed313e';
+                ctx.beginPath();
+                ctx.roundRect ? ctx.roundRect(o.x, o.y, o.w, o.h, 10) : ctx.rect(o.x, o.y, o.w, o.h);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.28)';
+                ctx.fillRect(o.x + 8, o.y + 8, o.w - 16, 6);
+            }
+        }
+        // ball shadow + ball
+        const by = ballY(), lift = jumpLift();
+        const shScale = 1 - Math.min(lift / (H * 0.22), 0.55);
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(ball.x, by + ball.r * 0.9, ball.r * shScale, ball.r * 0.35 * shScale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        const scale = 1 + lift / (H * 0.16) * 0.55;
+        const r = ball.r * scale;
+        const grad = ctx.createRadialGradient(ball.x - r * 0.3, by - lift - r * 0.3, r * 0.2, ball.x, by - lift, r);
+        grad.addColorStop(0, '#ffe29a');
+        grad.addColorStop(1, '#f0a71b');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(ball.x, by - lift, r, 0, Math.PI * 2);
+        ctx.fill();
+        // HUD
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 20px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(Math.floor(dist) + ' m', 16, 32);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.font = '600 14px system-ui, sans-serif';
+        ctx.fillText('Best ' + best + ' m', W - 16, 28);
+        if (boostHeld) {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#73a89a';
+            ctx.font = '700 14px system-ui, sans-serif';
+            ctx.fillText('BOOST', W / 2, 30);
+        }
+    }
+    function frame(t) {
+        if (!last)
+            last = t;
+        const dt = Math.min((t - last) / 1000, 0.05);
+        last = t;
+        if (phase === 'playing')
+            step(dt);
+        draw();
+        raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+    // --- inputs ---
+    function press(el, on, off) {
+        el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); on(); });
+        const end = (e) => { e.preventDefault(); if (off)
+            off(); };
+        el.addEventListener('pointerup', end);
+        el.addEventListener('pointercancel', end);
+    }
+    press(jumpBtn, () => { jumpBtn.classList.add('tr-on'); doJump(); }, () => jumpBtn.classList.remove('tr-on'));
+    press(boostBtn, () => { boostHeld = true; boostBtn.classList.add('tr-on'); }, () => { boostHeld = false; boostBtn.classList.remove('tr-on'); });
+    function onPointerDown(e) {
+        if (phase !== 'playing')
+            return;
+        const rect = canvas.getBoundingClientRect();
+        dragging = true;
+        dragX = e.clientX - rect.left;
+    }
+    function onPointerMove(e) {
+        if (!dragging)
+            return;
+        const rect = canvas.getBoundingClientRect();
+        dragX = e.clientX - rect.left;
+    }
+    function onPointerUp() { dragging = false; }
+    function onKey(e, down) {
+        if (e.key === 'ArrowLeft' || e.key === 'a')
+            keyLeft = down;
+        if (e.key === 'ArrowRight' || e.key === 'd')
+            keyRight = down;
+        if ((e.key === ' ' || e.key === 'ArrowUp') && down) {
+            e.preventDefault();
+            doJump();
+        }
+        if (e.key === 'Shift')
+            boostHeld = down;
+    }
+    const keyDown = (e) => onKey(e, true);
+    const keyUp = (e) => onKey(e, false);
+    function onVis() {
+        if (document.hidden && phase === 'playing') {
+            phase = 'paused';
+            overlay.innerHTML =
+                '<div class="tr-panel"><div class="tr-title">Paused</div>' +
+                    '<button class="tr-start" type="button">Resume</button></div>';
+            overlay.classList.remove('tr-hidden');
+            overlay.querySelector('.tr-start').addEventListener('click', () => {
+                phase = 'playing';
+                overlay.classList.add('tr-hidden');
+            });
+        }
+    }
+    const onWinResize = () => resize();
+    window.addEventListener('deviceorientation', onOrientation);
+    window.addEventListener('resize', onWinResize);
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('keyup', keyUp);
+    document.addEventListener('visibilitychange', onVis);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    return function destroy() {
+        cancelAnimationFrame(raf);
+        window.removeEventListener('deviceorientation', onOrientation);
+        window.removeEventListener('resize', onWinResize);
+        window.removeEventListener('keydown', keyDown);
+        window.removeEventListener('keyup', keyUp);
+        document.removeEventListener('visibilitychange', onVis);
+        container.innerHTML = '';
+    };
+}
+startTiltRunner(document.getElementById('game-root'));
+</script>
+</body>
+</html>

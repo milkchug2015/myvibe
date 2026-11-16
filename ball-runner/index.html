@@ -36,7 +36,7 @@ function startTiltRunner(container) {
 .tr-tilt{color:#9fe0c9;font-size:12px;margin-top:12px;font-weight:700;letter-spacing:.03em;line-height:1.4}
 .tr-tilt.tr-warn{color:#f4a261}
 .tr-tilt{cursor:pointer}
-.tr-tiltbtn{background:none;border:1px solid rgba(255,255,255,.35);color:rgba(255,255,255,.8);border-radius:8px;padding:8px 16px;font-size:13px;margin-top:10px;cursor:pointer}
+.tr-tiltbtn{display:block;margin:10px auto 0;background:none;border:1px solid rgba(255,255,255,.35);color:rgba(255,255,255,.8);border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer}
 `;
     const styleEl = document.createElement('style');
     styleEl.textContent = css;
@@ -163,18 +163,19 @@ function startTiltRunner(container) {
         }
         catch (e) { /* older browsers */ }
     }
-    async function onStart() {
-        if (!tiltMode) {
-            startRun();
-            return;
-        }
+    function requestTiltPermission() {
         const doe = window.DeviceOrientationEvent;
         if (doe && typeof doe.requestPermission === 'function') {
-            try {
-                await doe.requestPermission();
-            }
-            catch (e) { /* user declined; fallbacks stay on */ }
+            return Promise.race([
+                doe.requestPermission().catch(() => 'error'),
+                new Promise(res => setTimeout(() => res('timeout'), 3000))
+            ]);
         }
+        return Promise.resolve('not-needed');
+    }
+    async function onStart() {
+        if (tiltMode)
+            await requestTiltPermission();
         startRun();
     }
     overlay.querySelector('.tr-start').addEventListener('click', onStart);
@@ -193,16 +194,10 @@ function startTiltRunner(container) {
         tiltBtn.textContent = 'Tilt steering: ' + (tiltMode ? 'on' : 'off');
         tiltBtn.addEventListener('click', async () => {
             if (!tiltMode) {
-                const doe = window.DeviceOrientationEvent;
-                if (doe && typeof doe.requestPermission === 'function') {
-                    try {
-                        const r = await doe.requestPermission();
-                        if (r !== 'granted') {
-                            updateTiltStatus();
-                            return;
-                        }
-                    }
-                    catch (e) { /* status line explains */ }
+                const r = await requestTiltPermission();
+                if (r === 'denied') {
+                    updateTiltStatus();
+                    return;
                 }
             }
             setTiltMode(!tiltMode);

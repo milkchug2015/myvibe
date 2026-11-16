@@ -35,6 +35,8 @@ function startTiltRunner(container) {
 .tr-score{color:#ffd166;font-size:26px;font-weight:700;margin-bottom:4px}
 .tr-tilt{color:#9fe0c9;font-size:12px;margin-top:12px;font-weight:700;letter-spacing:.03em;line-height:1.4}
 .tr-tilt.tr-warn{color:#f4a261}
+.tr-tilt{cursor:pointer}
+.tr-tiltbtn{background:none;border:1px solid rgba(255,255,255,.35);color:rgba(255,255,255,.8);border-radius:8px;padding:8px 16px;font-size:13px;margin-top:10px;cursor:pointer}
 `;
     const styleEl = document.createElement('style');
     styleEl.textContent = css;
@@ -48,10 +50,11 @@ function startTiltRunner(container) {
             '<div class="tr-overlay">' +
             '<div class="tr-panel">' +
             '<div class="tr-title">Tilt Runner</div>' +
-            '<div class="tr-sub">Tilt your phone left and right to steer.<br>Bottom-left button jumps. Bottom-right button boosts.</div>' +
+            '<div class="tr-sub">Drag on the track to steer.<br>Bottom-left button jumps. Bottom-right button boosts.</div>' +
             '<button class="tr-start" type="button">Start</button>' +
-            '<div class="tr-note">No tilt sensor? Drag on the track to steer, or use the arrow keys.</div>' +
-            '<div class="tr-tilt">Tilt: checking sensor\u2026</div>' +
+            '<button class="tr-tiltbtn" type="button">Tilt steering: off</button>' +
+            '<div class="tr-note">Desktop: arrow keys steer.</div>' +
+            '<div class="tr-tilt"></div>' +
             '</div>' +
             '</div>';
     container.appendChild(stage);
@@ -85,6 +88,11 @@ function startTiltRunner(container) {
     let obstacles = [];
     // steering inputs
     let gamma0 = null, gamma = 0, gotTilt = false;
+    let tiltMode = false;
+    try {
+        tiltMode = localStorage.getItem('tiltRunnerTilt') === '1';
+    }
+    catch (e) { /* private mode */ }
     let keyLeft = false, keyRight = false;
     let dragging = false, dragX = 0;
     function ballY() { return H * 0.72; }
@@ -156,6 +164,10 @@ function startTiltRunner(container) {
         catch (e) { /* older browsers */ }
     }
     async function onStart() {
+        if (!tiltMode) {
+            startRun();
+            return;
+        }
         const doe = window.DeviceOrientationEvent;
         if (doe && typeof doe.requestPermission === 'function') {
             try {
@@ -166,6 +178,42 @@ function startTiltRunner(container) {
         startRun();
     }
     overlay.querySelector('.tr-start').addEventListener('click', onStart);
+    const tiltBtn = stage.querySelector('.tr-tiltbtn');
+    function setTiltMode(on) {
+        tiltMode = on;
+        try {
+            localStorage.setItem('tiltRunnerTilt', on ? '1' : '0');
+        }
+        catch (e) { /* ignore */ }
+        if (tiltBtn)
+            tiltBtn.textContent = 'Tilt steering: ' + (on ? 'on' : 'off');
+        updateTiltStatus();
+    }
+    if (tiltBtn) {
+        tiltBtn.textContent = 'Tilt steering: ' + (tiltMode ? 'on' : 'off');
+        tiltBtn.addEventListener('click', async () => {
+            if (!tiltMode) {
+                const doe = window.DeviceOrientationEvent;
+                if (doe && typeof doe.requestPermission === 'function') {
+                    try {
+                        const r = await doe.requestPermission();
+                        if (r !== 'granted') {
+                            updateTiltStatus();
+                            return;
+                        }
+                    }
+                    catch (e) { /* status line explains */ }
+                }
+            }
+            setTiltMode(!tiltMode);
+        });
+    }
+    stage.addEventListener('click', (e) => {
+        if (e.target && e.target.classList && e.target.classList.contains('tr-tilt') && tiltMode && gotTilt) {
+            gamma0 = gamma;
+            updateTiltStatus();
+        }
+    });
     function onOrientation(e) {
         if (typeof e.gamma === 'number' && e.gamma !== null && !isNaN(e.gamma)) {
             gamma = e.gamma;
@@ -183,9 +231,14 @@ function startTiltRunner(container) {
         const el = stage.querySelector('.tr-tilt');
         if (!el)
             return;
+        if (!tiltMode) {
+            el.classList.remove('tr-warn');
+            el.textContent = 'Tilt: off - drag to steer';
+            return;
+        }
         if (gotTilt) {
             el.classList.remove('tr-warn');
-            el.textContent = 'Tilt: sensor active';
+            el.textContent = 'Tilt: sensor active - tap this line to recalibrate';
         }
         else {
             el.classList.add('tr-warn');
@@ -194,9 +247,9 @@ function startTiltRunner(container) {
     }
     function steer(dt) {
         let s = 0;
-        if (gotTilt && gamma0 !== null) {
+        if (tiltMode && gotTilt && gamma0 !== null) {
             const d = gamma - gamma0;
-            s = Math.abs(d) < 2 ? 0 : Math.max(-1, Math.min(1, d / 20));
+            s = Math.abs(d) < 6 ? 0 : Math.max(-1, Math.min(1, d / 35));
         }
         if (keyLeft)
             s = -1;

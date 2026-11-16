@@ -1,4 +1,4 @@
-const CACHE = 'tilt-runner-v3';
+const CACHE = 'tilt-runner-v4';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -17,6 +17,19 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Page navigations: network first so updates arrive immediately,
+  // cached page as offline fallback.
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        const copy = resp.clone();
+        caches.open(CACHE).then(c => { c.put('./', resp.clone()); c.put('./index.html', copy); });
+        return resp;
+      }).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+  // Static assets (icons, manifest): cache first, network fills in.
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
       const copy = resp.clone();

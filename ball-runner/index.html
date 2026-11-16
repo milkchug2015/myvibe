@@ -45,22 +45,20 @@ function startTiltRunner(container) {
     stage.className = 'tr-stage';
     stage.innerHTML =
         '<canvas class="tr-canvas"></canvas>' +
-            '<button class="tr-btn tr-jump" type="button" aria-label="Jump">JUMP</button>' +
             '<button class="tr-btn tr-boost" type="button" aria-label="Boost">BOOST</button>' +
             '<div class="tr-overlay">' +
             '<div class="tr-panel">' +
             '<div class="tr-title">Tilt Runner</div>' +
-            '<div class="tr-sub">Drag on the track to steer.<br>Bottom-left button jumps. Bottom-right button boosts.</div>' +
+            '<div class="tr-sub">Drag on the track to steer.<br>Quick swipe up jumps. Bottom-right button boosts.</div>' +
             '<button class="tr-start" type="button">Start</button>' +
             '<button class="tr-tiltbtn" type="button">Tilt steering: off</button>' +
-            '<div class="tr-note">Desktop: arrow keys steer.</div>' +
+            '<div class="tr-note">Desktop: arrows steer, Space jumps, Shift boosts.</div>' +
             '<div class="tr-tilt"></div>' +
             '</div>' +
             '</div>';
     container.appendChild(stage);
     const canvas = stage.querySelector('.tr-canvas');
     const ctx = canvas.getContext('2d');
-    const jumpBtn = stage.querySelector('.tr-jump');
     const boostBtn = stage.querySelector('.tr-boost');
     const overlay = stage.querySelector('.tr-overlay');
     let W = 300, H = 500;
@@ -381,20 +379,32 @@ function startTiltRunner(container) {
         el.addEventListener('pointerup', end);
         el.addEventListener('pointercancel', end);
     }
-    press(jumpBtn, () => { jumpBtn.classList.add('tr-on'); doJump(); }, () => jumpBtn.classList.remove('tr-on'));
     press(boostBtn, () => { boostHeld = true; boostBtn.classList.add('tr-on'); }, () => { boostHeld = false; boostBtn.classList.remove('tr-on'); });
+    let dragStartX = 0, dragStartY = 0, dragStartT = 0, jumpFired = false;
     function onPointerDown(e) {
         if (phase !== 'playing')
             return;
         const rect = canvas.getBoundingClientRect();
         dragging = true;
         dragX = e.clientX - rect.left;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragStartT = performance.now();
+        jumpFired = false;
     }
     function onPointerMove(e) {
         if (!dragging)
             return;
         const rect = canvas.getBoundingClientRect();
         dragX = e.clientX - rect.left;
+        if (!jumpFired) {
+            const dy = dragStartY - e.clientY;
+            const dx = Math.abs(e.clientX - dragStartX);
+            if (dy > 60 && performance.now() - dragStartT < 350 && dy > dx * 1.5) {
+                jumpFired = true;
+                doJump();
+            }
+        }
     }
     function onPointerUp() { dragging = false; }
     function onKey(e, down) {

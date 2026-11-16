@@ -400,7 +400,9 @@ function startTiltRunner(container) {
         if (!jumpFired) {
             const dy = dragStartY - e.clientY;
             const dx = Math.abs(e.clientX - dragStartX);
-            if (dy > 60 && performance.now() - dragStartT < 350 && dy > dx * 1.5) {
+            if (dx > 40) {
+                jumpFired = true; // clearly a steering touch: no jump this touch
+            } else if (dy > 60 && performance.now() - dragStartT < 350 && dy > dx * 2) {
                 jumpFired = true;
                 doJump();
             }
